@@ -1,3 +1,2 @@
-pyTelegramBotAPI
-pymongo
-dnspython
+python-telegram-bot
+pymongo[srv]
