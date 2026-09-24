@@ -115,7 +115,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    await update.message.reply_text("❌ অপারেশন বাতিল করা হয়েছে।", reply_markup=get_main_keyboard(user_id))
+    await update.message.reply_text("❌ Operation cancelled.", reply_markup=get_main_keyboard(user_id))
     return ConversationHandler.END
 
 # ----------------- SELL DOLLAR FLOW -----------------
@@ -125,9 +125,9 @@ async def sell_dollar_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rate = settings.get("sell_rate", 115.0)
     
     text = (
-        f"🔴 বর্তমান সেল রেট: ১ USD = {rate} BDT\n"
-        "❗ (সর্বনিম্ন / Minimum 0.10$) ❗\n\n"
-        "👉 আপনি কত ডলার সেল করতে চান তা নিচে লিখুন:"
+        f"🔴 Current Sell Rate: 1 USD = {rate} BDT\n"
+        "❗ (Minimum Order: 0.10$) ❗\n\n"
+        "👉 Enter the amount of USD you want to sell:"
     )
     
     keyboard = ReplyKeyboardMarkup([["🔙 Cancel"]], resize_keyboard=True)
@@ -142,23 +142,29 @@ async def process_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         amount = float(text)
         if amount < 0.10:
-            await update.message.reply_text("⚠️ সর্বনিম্ন 0.10$ টাইপ করুন:")
+            await update.message.reply_text("⚠️ Minimum amount is 0.10$. Please try again:")
             return AMOUNT
     except ValueError:
-        await update.message.reply_text("⚠️ সঠিক সংখ্যা লিখুন (যেমন: 0.10, 5, 10):")
+        await update.message.reply_text("⚠️ Please enter a valid number (e.g. 0.10, 5, 10):")
         return AMOUNT
 
+    settings = get_settings()
+    rate = settings.get("sell_rate", 115.0)
+    total_bdt = amount * rate
+
     context.user_data['sell_amount'] = amount
+    context.user_data['total_bdt'] = total_bdt
     
     keyboard = ReplyKeyboardMarkup([
-        ["📱 bKash (বিকাশ)", "📱 Nagad (নগদ)"],
+        ["📱 bKash", "📱 Nagad"],
         ["🏦 Bank Transfer"],
         ["🔙 Cancel"]
     ], resize_keyboard=True)
     
     await update.message.reply_text(
-        "💳 টাকা গ্রহণ করার মাধ্যম নির্বাচন করুন:",
-        reply_markup=keyboard
+        f"💰 You will receive: **{total_bdt:.2f} BDT**\n\n💳 Select your payment receive method:",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
     )
     return RECEIVE_METHOD
 
@@ -171,8 +177,9 @@ async def process_receive_method(update: Update, context: ContextTypes.DEFAULT_T
     
     keyboard = ReplyKeyboardMarkup([["🔙 Cancel"]], resize_keyboard=True)
     await update.message.reply_text(
-        f"💰 পেমেন্ট রিসিভ করার জন্য আপনার {text} নম্বর লিখুন:",
-        reply_markup=keyboard
+        f"📱 Enter your **{text}** account number to receive BDT:",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
     )
     return ACCOUNT_NO
 
@@ -191,7 +198,7 @@ async def process_account_no(update: Update, context: ContextTypes.DEFAULT_TYPE)
     ], resize_keyboard=True)
 
     await update.message.reply_text(
-        "🌐 কোন মেথডে ডলার পাঠাবেন তা নির্বাচন করুন:",
+        "🌐 Select the network/method you will send USD from:",
         reply_markup=keyboard
     )
     return PAY_METHOD
@@ -204,15 +211,15 @@ async def process_pay_method(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data['pay_method'] = text
     settings = get_settings()
     addresses = settings.get("addresses", DEFAULT_PAY_ADDRESSES)
-    address = addresses.get(text, "ঠিকানা দেওয়া হয়নি।")
+    address = addresses.get(text, "Address not set. Please contact admin.")
 
     keyboard = ReplyKeyboardMarkup([["🔙 Cancel"]], resize_keyboard=True)
     
     msg = (
-        f"🚀 **পেমেন্ট এড্রেস / আইডি ({text}):**\n\n"
+        f"🚀 **Payment Address / ID ({text}):**\n\n"
         f"`{address}`\n\n"
-        "*(👆 এড্রেসের ওপর ক্লিক করে কপি করুন)*\n\n"
-        "📸 ডলার পাঠানোর পর পেমেন্ট স্ক্রিনশট পাঠান:"
+        "*(👆 Click on address to copy)*\n\n"
+        "📸 Send the payment screenshot after transferring USD:"
     )
     await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=keyboard)
     return PROOF
@@ -222,7 +229,7 @@ async def process_proof(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await cancel(update, context)
 
     if not update.message.photo:
-        await update.message.reply_text("⚠️ অনুগ্রহ করে স্ক্রিনশটের ছবি প্রোভাইড করুন:")
+        await update.message.reply_text("⚠️ Please send a valid payment screenshot image:")
         return PROOF
 
     photo_id = update.message.photo[-1].file_id
@@ -231,53 +238,54 @@ async def process_proof(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rate = settings.get("sell_rate", 115.0)
     
     amount = context.user_data.get('sell_amount', 0)
-    total_bdt = amount * rate
+    total_bdt = context.user_data.get('total_bdt', amount * rate)
     rec_method = context.user_data.get('receive_method', 'N/A')
     account_no = context.user_data.get('account_no', 'N/A')
     pay_method = context.user_data.get('pay_method', 'N/A')
     order_id = f"ORD-{int(datetime.now().timestamp())}"
 
-    # Database-এ অর্ডার সেভ
+    # Save order to MongoDB
     order_data = {
         "order_id": order_id,
         "user_id": user.id,
         "username": user.username,
+        "type": "SELL",
         "amount_usd": amount,
         "rate": rate,
         "total_bdt": total_bdt,
         "receive_method": rec_method,
         "account_no": account_no,
         "pay_method": pay_method,
-        "status": "Pending",
+        "status": "Pending ⏳",
         "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
     if orders_col is not None:
         orders_col.insert_one(order_data)
 
-    # User Confirmation Message
+    # User Receipt
     user_receipt = (
         "✅ **DOLLAR SELL ORDER CREATE SUCCESSFUL** ✅\n\n"
         f"🆔 **Order ID:** `{order_id}`\n"
-        f"💵 **সেল পরিমাণ:** `{amount:.2f} USD`\n"
-        f"💰 **আপনি রিসিভ করবেন:** `{total_bdt:.2f} BDT`\n"
-        f"📱 **রিসিভ মেথড:** `{rec_method}`\n"
-        f"🔢 **অ্যাকাউন্ট নম্বর:** `{account_no}`\n"
-        f"🌐 **ডলার মেথড:** `{pay_method}`\n\n"
-        f"⏳ **দয়া করে অপেক্ষা করুন, আপনার পেমেন্ট ভেরিফাই প্রসেসিং হচ্ছে। কিছু মিনিটের মধ্যে আপনার একাউন্টে {total_bdt:.2f} BDT চলে যাবে।** ❤️"
+        f"💵 **Sell Amount:** `{amount:.2f} USD`\n"
+        f"💰 **You Receive:** `{total_bdt:.2f} BDT`\n"
+        f"📱 **Receive Method:** `{rec_method}`\n"
+        f"🔢 **Account Number:** `{account_no}`\n"
+        f"🌐 **Send Method:** `{pay_method}`\n\n"
+        f"⏳ Please wait! Your payment verification is in progress. `{total_bdt:.2f} BDT` will be transferred to your account within a few minutes. ❤️"
     )
 
     await update.message.reply_text(user_receipt, parse_mode="Markdown", reply_markup=get_main_keyboard(user.id))
 
-    # Send Notification to Admin
+    # Send Alert to Admin
     if ADMIN_ID:
         admin_msg = (
             "🔔 **NEW DOLLAR SELL ORDER!**\n\n"
             f"🆔 **Order ID:** `{order_id}`\n"
-            f"👤 **ইউজার:** {user.full_name} (@{user.username or 'N/A'})\n"
+            f"👤 **User:** {user.full_name} (@{user.username or 'N/A'})\n"
             f"🆔 **User ID:** `{user.id}`\n"
-            f"💵 **পরিমাণ:** `{amount} USD` ({total_bdt:.2f} BDT)\n"
-            f"📱 **মেথড & নম্বর:** {rec_method} -> `{account_no}`\n"
-            f"🌐 **নেটওয়ার্ক:** {pay_method}"
+            f"💵 **Amount:** `{amount} USD` ({total_bdt:.2f} BDT)\n"
+            f"📱 **Method & No:** {rec_method} -> `{account_no}`\n"
+            f"🌐 **USD Network:** {pay_method}"
         )
         try:
             await context.bot.send_photo(chat_id=ADMIN_ID, photo=photo_id, caption=admin_msg, parse_mode="Markdown")
@@ -304,21 +312,21 @@ async def admin_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
 
     if query.data == "admin_set_sell_rate":
-        await query.message.reply_text("🔢 নতুন **Sell Rate** টাইপ করুন (যেমন: 118.5):")
+        await query.message.reply_text("🔢 Type new **Sell Rate** (e.g. 118.5):")
         return SET_SELL_RATE
     elif query.data == "admin_update_address":
         methods = ["BINANCE", "BYBIT", "BITGET", "BEP-20", "TRC-20", "USDT-SOLANA"]
         buttons = [[InlineKeyboardButton(m, callback_data=f"set_addr_{m}")] for m in methods]
-        await query.message.reply_text("যেটির এড্রেস পরিবর্তন করবেন তা সিলেক্ট করুন:", reply_markup=InlineKeyboardMarkup(buttons))
+        await query.message.reply_text("Select network to update address:", reply_markup=InlineKeyboardMarkup(buttons))
         return SET_METHOD_ADDRESS
 
 async def save_sell_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         new_rate = float(update.message.text)
         update_setting("sell_rate", new_rate)
-        await update.message.reply_text(f"✅ Sell Rate আপডেট করা হয়েছে: **{new_rate} BDT**", reply_markup=get_main_keyboard(update.effective_user.id))
+        await update.message.reply_text(f"✅ Sell Rate updated to **{new_rate} BDT**", reply_markup=get_main_keyboard(update.effective_user.id))
     except ValueError:
-        await update.message.reply_text("⚠️ সঠিক সংখ্যা লিখুন।")
+        await update.message.reply_text("⚠️ Please enter a valid number.")
     return ConversationHandler.END
 
 async def select_address_method(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -326,7 +334,7 @@ async def select_address_method(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     method = query.data.replace("set_addr_", "")
     context.user_data['editing_method'] = method
-    await query.message.reply_text(f"📝 **{method}** এর জন্য নতুন এড্রেস/আইডি লিখুন:")
+    await query.message.reply_text(f"📝 Enter new address/ID for **{method}**:")
     return SET_METHOD_ADDRESS
 
 async def save_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -337,13 +345,14 @@ async def save_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
     addresses[method] = new_address
     update_setting("addresses", addresses)
 
-    await update.message.reply_text(f"✅ **{method}** এর এড্রেস আপডেট করা হয়েছে!", reply_markup=get_main_keyboard(update.effective_user.id))
+    await update.message.reply_text(f"✅ Address for **{method}** updated successfully!", reply_markup=get_main_keyboard(update.effective_user.id))
     return ConversationHandler.END
 
 # General Message Handlers
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    user_id = update.effective_user.id
+    user = update.effective_user
+    user_id = user.id
     settings = get_settings()
 
     if text == "📊 EXCHANGE RATES":
@@ -360,17 +369,27 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if user_orders:
                 msg = "📋 **YOUR RECENT ORDERS:**\n\n"
                 for o in user_orders:
-                    msg += f"🔹 **ID:** `{o['order_id']}`\n💵 Amount: `{o['amount_usd']} USD` ({o['total_bdt']} BDT)\n📌 Status: *{o['status']}*\n📅 Date: {o['date']}\n\n"
+                    msg += (
+                        f"🆔 **Order ID:** `{o['order_id']}`\n"
+                        f"💵 **Amount:** `{o['amount_usd']} USD` ({o['total_bdt']:.2f} BDT)\n"
+                        f"📱 **Account:** {o['receive_method']} ({o['account_no']})\n"
+                        f"📌 **Status:** {o['status']}\n"
+                        f"📅 **Date:** {o['date']}\n\n"
+                    )
                 await update.message.reply_text(msg, parse_mode="Markdown")
                 return
-        await update.message.reply_text("📋 আপনার কোনো একটিভ অর্ডার নেই।")
+        await update.message.reply_text("📋 You have no active or previous orders.")
 
     elif text == "👤 MY PROFILE":
+        bot_username = context.bot.username
+        ref_link = f"https://t.me/{bot_username}?start={user_id}"
+        
         profile_text = (
             f"👤 **MY PROFILE**\n\n"
-            f"• **Name:** {update.effective_user.full_name}\n"
+            f"• **Name:** {user.full_name}\n"
             f"• **User ID:** `{user_id}`\n"
-            f"• **Username:** @{update.effective_user.username or 'N/A'}"
+            f"• **Username:** @{user.username or 'N/A'}\n"
+            f"• **Referral Link:** `{ref_link}`"
         )
         await update.message.reply_text(profile_text, parse_mode="Markdown")
 
